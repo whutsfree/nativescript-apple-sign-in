@@ -9,7 +9,12 @@ export declare interface SignInWithAppleOptions {
 
 export declare interface SignInWithAppleCredentials {
   user: string;
-  // scopes: Array<SignInWithAppleScope>;
+  identityToken: any;
+  authorizationCode: any;
+  state: string;
+  fullName: string;
+  email: string;
+  scopes: Array<SignInWithAppleScope>;
 }
 
 export declare function isSignInWithAppleSupported(): boolean;

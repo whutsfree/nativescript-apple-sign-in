@@ -109,10 +109,6 @@ class ASAuthorizationControllerDelegateImpl extends NSObject /* implements ASAut
   authorizationControllerDidCompleteWithAuthorization(controller: any /* ASAuthorizationController */, authorization: any /* ASAuthorization */): void {
     console.log(">>> credential.state: " + authorization.credential.state); // string
 
-    // these properties don't seem useful for now
-    // const authCode = NSString.alloc().initWithDataEncoding(authorization.credential.authorizationCode, NSUTF8StringEncoding);
-    // console.log(">>> credential.identityToken: " + authorization.credential.identityToken); // nsdata
-
     // These require a scope
     // console.log(">>> credential.fullName: " + authorization.credential.fullName); // NSPersonNameComponents (familyName, etc)
     // console.log(">>> credential.email: " + authorization.credential.email); // string
@@ -120,8 +116,18 @@ class ASAuthorizationControllerDelegateImpl extends NSObject /* implements ASAut
     // console.log(">>> credential.realUserStatus: " + authorization.credential.realUserStatus); // enum
 
     // TODO return granted scopes
+
+    const authorizationCode = NSString.alloc().initWithDataEncoding(authorization.credential.authorizationCode, NSUTF8StringEncoding);
+    const identityToken = NSString.alloc().initWithDataEncoding(authorization.credential.identityToken, NSUTF8StringEncoding);
+    const fullName = authorization.credential.fullName;
+    const email = authorization.credential.email;
+
     this.resolve(<SignInWithAppleCredentials>{
       user: authorization.credential.user,
+      authorizationCode: "" + authorizationCode,
+      identityToken: "" + identityToken,
+      fullName: fullName.givenName + " " + fullName.familyName,
+      email: email
       // scopes: authorization.credential.authorizedScopes // nsarray<asauthorizationscope>
     });
   }
