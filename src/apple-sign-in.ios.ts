@@ -3,6 +3,7 @@ import { ios as iOSUtils } from "tns-core-modules/utils/utils";
 import { SignInWithAppleCredentials, SignInWithAppleOptions, SignInWithAppleState } from "./index";
 import jsArrayToNSArray = iOSUtils.collections.jsArrayToNSArray;
 
+let FileSystemAccess = require('tns-core-modules/file-system/file-system-access').FileSystemAccess;
 let controller: any /* ASAuthorizationController */;
 let delegate: ASAuthorizationControllerDelegateImpl;
 
@@ -107,6 +108,40 @@ class ASAuthorizationControllerDelegateImpl extends NSObject /* implements ASAut
   }
 
   authorizationControllerDidCompleteWithAuthorization(controller: any /* ASAuthorizationController */, authorization: any /* ASAuthorization */): void {
+      const loadData = (): { name?: string, email?: string } => {
+          let fsa = new FileSystemAccess();
+          let fileName = fsa.getDocumentsFolderPath() + "/appleSignIn.db";
+          if (!fsa.fileExists(fileName)) {
+              return {};
+          }
+
+          let data;
+          try {
+              let textData = fsa.readText(fileName);
+              data = JSON.parse(textData);
+              return data;
+          }
+          catch (err) {
+              console.log("error reading storage, Error: ", err);
+          }
+          return {};
+      };
+
+      const saveData = (data: { email: string, name: string }) => {
+          let fsa = new FileSystemAccess();
+          let fileName = fsa.getDocumentsFolderPath() + "/appleSignIn.db";
+          const existingData = loadData();
+          try {
+              if (!data.email) data.email = existingData.email;
+              if (!data.name) data.name = existingData.name;
+              fsa.writeText(fileName, JSON.stringify(data));
+          } catch (err) {
+              // This should never happen on normal data, but if they tried to put non JS stuff it won't serialize
+              console.log("unable to write storage, error: ", err);
+          }
+      };
+
+
     console.log(">>> credential.state: " + authorization.credential.state); // string
 
     // These require a scope
@@ -120,13 +155,35 @@ class ASAuthorizationControllerDelegateImpl extends NSObject /* implements ASAut
     const authorizationCode = NSString.alloc().initWithDataEncoding(authorization.credential.authorizationCode, NSUTF8StringEncoding);
     const identityToken = NSString.alloc().initWithDataEncoding(authorization.credential.identityToken, NSUTF8StringEncoding);
     const fullName = authorization.credential.fullName;
-    const email = authorization.credential.email;
+    const firstName = fullName.givenName;
+    const lastName = fullName.familyName;
+      let email = authorization.credential.email;
+    let name = null;
+    if (firstName && lastName) {
+        name = firstName + " " + lastName;
+    } else if (firstName) {
+        name = firstName;
+    } else if (lastName) {
+        name = lastName;
+    }
+
+    if (name || email) {
+        // save for re-use if needed
+        saveData({name, email});
+    }
+
+    if (!name || !email) {
+        const data = loadData();
+        // retrieve last save data
+        if (!name) name = data.name;
+        if (!email) email = data.email;
+    }
 
     this.resolve(<SignInWithAppleCredentials>{
       user: authorization.credential.user,
       authorizationCode: "" + authorizationCode,
       identityToken: "" + identityToken,
-      fullName: fullName.givenName + " " + fullName.familyName,
+      fullName: name,
       email: email
       // scopes: authorization.credential.authorizedScopes // nsarray<asauthorizationscope>
     });
