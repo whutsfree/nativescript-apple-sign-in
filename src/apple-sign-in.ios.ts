@@ -3,9 +3,17 @@ import { ios as iOSUtils } from "tns-core-modules/utils/utils";
 import { SignInWithAppleCredentials, SignInWithAppleOptions, SignInWithAppleState } from "./index";
 import jsArrayToNSArray = iOSUtils.collections.jsArrayToNSArray;
 
+declare function __nslog(message: string): void;
+
+function logLocal(message) {
+    console.log(message);
+    // __nslog("CONSOLE LOG: " + message);
+}
+
 let FileSystemAccess = require('tns-core-modules/file-system/file-system-access').FileSystemAccess;
 let controller: any /* ASAuthorizationController */;
-let delegate: ASAuthorizationControllerDelegateImpl;
+let resolveCallback = null;
+let rejectCallback = null;
 
 declare const ASAuthorizationAppleIDProvider, ASAuthorizationController, ASAuthorizationControllerDelegate,
     ASAuthorizationScopeEmail, ASAuthorizationScopeFullName: any;
@@ -48,6 +56,7 @@ export function getSignInWithAppleState(user: string): Promise<SignInWithAppleSt
 }
 
 export function signInWithApple(options?: SignInWithAppleOptions): Promise<SignInWithAppleCredentials> {
+    logLocal("Attempt signInWithApple");
   return new Promise<any>((resolve, reject) => {
     if (!isSignInWithAppleSupported()) {
       reject("Not supported");
@@ -69,127 +78,126 @@ export function signInWithApple(options?: SignInWithAppleOptions): Promise<SignI
         } else if (s === "FULLNAME") {
           nsArray.addObject(ASAuthorizationScopeFullName);
         } else {
-          console.log("Unsupported scope: " + s + ", use either EMAIL or FULLNAME");
+          logLocal("Unsupported scope: " + s + ", use either EMAIL or FULLNAME");
         }
       });
       request.requestedScopes = nsArray;
     }
 
     controller = ASAuthorizationController.alloc().initWithAuthorizationRequests(jsArrayToNSArray([request]));
-    controller.delegate = delegate = ASAuthorizationControllerDelegateImpl.createWithPromise(resolve, reject);
+    resolveCallback = resolve;
+    rejectCallback = reject;
+    controller.delegate = getSignInDelegate();
+      logLocal("Delegate ready");
     controller.performRequests();
+      logLocal("Perform requests...");
   });
 }
 
-class ASAuthorizationControllerDelegateImpl extends NSObject /* implements ASAuthorizationControllerDelegate */ {
-  public static ObjCProtocols = [];
-  private resolve;
-  private reject;
+let _delegateInstance = null;
+function getSignInDelegate() {
+    if (!_delegateInstance) {
+        class MyAppleSignInDelegate extends NSObject /* implements ASAuthorizationControllerDelegate */ {
+            static ObjCProtocols = [ASAuthorizationControllerDelegate];
 
-  public static new(): ASAuthorizationControllerDelegateImpl {
-    try {
-      ASAuthorizationControllerDelegateImpl.ObjCProtocols.push(ASAuthorizationControllerDelegate);
-      return <ASAuthorizationControllerDelegateImpl>super.new();
-    } catch (ignore) {
-      console.log("Apple Sign In not supported on this device - it requires iOS 13+. Tip: use 'isSignInWithAppleSupported' before calling 'signInWithApple'.");
-      return null;
+            constructor() {
+                super();
+                logLocal("Construct Apple Sign In Delegate");
+            }
+
+            authorizationControllerDidCompleteWithAuthorization(controller: any /* ASAuthorizationController */, authorization: any /* ASAuthorization */): void {
+                logLocal("authorizationControllerDidCompleteWithAuthorization");
+
+                const loadData = (): { name?: string, email?: string } => {
+                    let fsa = new FileSystemAccess();
+                    let fileName = fsa.getDocumentsFolderPath() + "/appleSignIn.db";
+                    if (!fsa.fileExists(fileName)) {
+                        return {};
+                    }
+
+                    let data;
+                    try {
+                        let textData = fsa.readText(fileName);
+                        data = JSON.parse(textData);
+                        return data;
+                    }
+                    catch (err) {
+                        logLocal("error reading storage, Error: " + err);
+                    }
+                    return {};
+                };
+
+                const saveData = (data: { email: string, name: string }) => {
+                    let fsa = new FileSystemAccess();
+                    let fileName = fsa.getDocumentsFolderPath() + "/appleSignIn.db";
+                    const existingData = loadData();
+                    try {
+                        if (!data.email) data.email = existingData.email;
+                        if (!data.name) data.name = existingData.name;
+                        fsa.writeText(fileName, JSON.stringify(data));
+                    } catch (err) {
+                        // This should never happen on normal data, but if they tried to put non JS stuff it won't serialize
+                        logLocal("unable to write storage, error: " + err);
+                    }
+                };
+
+
+                logLocal(">>> credential.state: " + authorization.credential.state); // string
+
+                // These require a scope
+                // logLocal(">>> credential.fullName: " + authorization.credential.fullName); // NSPersonNameComponents (familyName, etc)
+                // logLocal(">>> credential.email: " + authorization.credential.email); // string
+
+                // logLocal(">>> credential.realUserStatus: " + authorization.credential.realUserStatus); // enum
+
+                // TODO return granted scopes
+
+                const authorizationCode = NSString.alloc().initWithDataEncoding(authorization.credential.authorizationCode, NSUTF8StringEncoding);
+                const identityToken = NSString.alloc().initWithDataEncoding(authorization.credential.identityToken, NSUTF8StringEncoding);
+                const fullName = authorization.credential.fullName;
+                const firstName = fullName.givenName;
+                const lastName = fullName.familyName;
+                let email = authorization.credential.email;
+                let name = null;
+                if (firstName && lastName) {
+                    name = firstName + " " + lastName;
+                } else if (firstName) {
+                    name = firstName;
+                } else if (lastName) {
+                    name = lastName;
+                }
+
+                if (name || email) {
+                    // save for re-use if needed
+                    saveData({name, email});
+                }
+
+                if (!name || !email) {
+                    const data = loadData();
+                    // retrieve last save data
+                    if (!name) name = data.name;
+                    if (!email) email = data.email;
+                }
+
+                resolveCallback(<SignInWithAppleCredentials>{
+                    user: authorization.credential.user,
+                    authorizationCode: "" + authorizationCode,
+                    identityToken: "" + identityToken,
+                    fullName: name,
+                    email: email
+                    // scopes: authorization.credential.authorizedScopes // nsarray<asauthorizationscope>
+                });
+            }
+
+            authorizationControllerDidCompleteWithError(controller: any /* ASAuthorizationController */, error: NSError): void {
+                logLocal("authorizationControllerDidCompleteWithError");
+
+                rejectCallback(error.localizedDescription);
+            }
+        }
+
+        _delegateInstance = new MyAppleSignInDelegate();
     }
-  }
 
-  public static createWithPromise(resolve, reject): ASAuthorizationControllerDelegateImpl {
-    const delegate = <ASAuthorizationControllerDelegateImpl>ASAuthorizationControllerDelegateImpl.new();
-    if (delegate === null) {
-      reject("Not supported");
-    } else {
-      delegate.resolve = resolve;
-      delegate.reject = reject;
-    }
-    return delegate;
-  }
-
-  authorizationControllerDidCompleteWithAuthorization(controller: any /* ASAuthorizationController */, authorization: any /* ASAuthorization */): void {
-      const loadData = (): { name?: string, email?: string } => {
-          let fsa = new FileSystemAccess();
-          let fileName = fsa.getDocumentsFolderPath() + "/appleSignIn.db";
-          if (!fsa.fileExists(fileName)) {
-              return {};
-          }
-
-          let data;
-          try {
-              let textData = fsa.readText(fileName);
-              data = JSON.parse(textData);
-              return data;
-          }
-          catch (err) {
-              console.log("error reading storage, Error: ", err);
-          }
-          return {};
-      };
-
-      const saveData = (data: { email: string, name: string }) => {
-          let fsa = new FileSystemAccess();
-          let fileName = fsa.getDocumentsFolderPath() + "/appleSignIn.db";
-          const existingData = loadData();
-          try {
-              if (!data.email) data.email = existingData.email;
-              if (!data.name) data.name = existingData.name;
-              fsa.writeText(fileName, JSON.stringify(data));
-          } catch (err) {
-              // This should never happen on normal data, but if they tried to put non JS stuff it won't serialize
-              console.log("unable to write storage, error: ", err);
-          }
-      };
-
-
-    console.log(">>> credential.state: " + authorization.credential.state); // string
-
-    // These require a scope
-    // console.log(">>> credential.fullName: " + authorization.credential.fullName); // NSPersonNameComponents (familyName, etc)
-    // console.log(">>> credential.email: " + authorization.credential.email); // string
-
-    // console.log(">>> credential.realUserStatus: " + authorization.credential.realUserStatus); // enum
-
-    // TODO return granted scopes
-
-    const authorizationCode = NSString.alloc().initWithDataEncoding(authorization.credential.authorizationCode, NSUTF8StringEncoding);
-    const identityToken = NSString.alloc().initWithDataEncoding(authorization.credential.identityToken, NSUTF8StringEncoding);
-    const fullName = authorization.credential.fullName;
-    const firstName = fullName.givenName;
-    const lastName = fullName.familyName;
-      let email = authorization.credential.email;
-    let name = null;
-    if (firstName && lastName) {
-        name = firstName + " " + lastName;
-    } else if (firstName) {
-        name = firstName;
-    } else if (lastName) {
-        name = lastName;
-    }
-
-    if (name || email) {
-        // save for re-use if needed
-        saveData({name, email});
-    }
-
-    if (!name || !email) {
-        const data = loadData();
-        // retrieve last save data
-        if (!name) name = data.name;
-        if (!email) email = data.email;
-    }
-
-    this.resolve(<SignInWithAppleCredentials>{
-      user: authorization.credential.user,
-      authorizationCode: "" + authorizationCode,
-      identityToken: "" + identityToken,
-      fullName: name,
-      email: email
-      // scopes: authorization.credential.authorizedScopes // nsarray<asauthorizationscope>
-    });
-  }
-
-  authorizationControllerDidCompleteWithError(controller: any /* ASAuthorizationController */, error: NSError): void {
-    this.reject(error.localizedDescription);
-  }
+    return _delegateInstance;
 }
