@@ -1,7 +1,7 @@
-import { device } from "tns-core-modules/platform";
-import { ios as iOSUtils } from "tns-core-modules/utils/utils";
+import { device } from "@nativescript/core/platform/platform";
+import { iOSNativeHelper } from "@nativescript/core/utils/utils";
 import { SignInWithAppleCredentials, SignInWithAppleOptions, SignInWithAppleState } from "./index";
-import jsArrayToNSArray = iOSUtils.collections.jsArrayToNSArray;
+import jsArrayToNSArray = iOSNativeHelper.collections.jsArrayToNSArray;
 
 declare function __nslog(message: string): void;
 
@@ -10,7 +10,7 @@ function logLocal(message) {
     // __nslog("CONSOLE LOG: " + message);
 }
 
-let FileSystemAccess = require('tns-core-modules/file-system/file-system-access').FileSystemAccess;
+let FileSystemAccess = require('@nativescript/core/file-system/file-system-access').FileSystemAccess;
 let controller: any /* ASAuthorizationController */;
 let resolveCallback = null;
 let rejectCallback = null;
