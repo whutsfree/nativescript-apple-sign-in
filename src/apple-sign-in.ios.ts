@@ -1,5 +1,5 @@
-import { device } from "@nativescript/core/platform/platform";
-import { iOSNativeHelper } from "@nativescript/core/utils/utils";
+import { Device } from "@nativescript/core/platform";
+import { iOSNativeHelper } from "@nativescript/core/utils";
 import { SignInWithAppleCredentials, SignInWithAppleOptions, SignInWithAppleState } from "./index";
 import jsArrayToNSArray = iOSNativeHelper.collections.jsArrayToNSArray;
 
@@ -19,7 +19,7 @@ declare const ASAuthorizationAppleIDProvider, ASAuthorizationController, ASAutho
     ASAuthorizationScopeEmail, ASAuthorizationScopeFullName: any;
 
 export function isSignInWithAppleSupported(): boolean {
-  return parseInt(device.osVersion) >= 13;
+  return parseInt(Device.osVersion) >= 13;
 }
 
 export function getSignInWithAppleState(user: string): Promise<SignInWithAppleState> {
